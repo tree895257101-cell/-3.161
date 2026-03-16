@@ -1,0 +1,1810 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>多产品报价单系统 (Airtable自动保存版)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#165DFF',
+                        secondary: '#36B37E',
+                        accent: '#FF5630',
+                        neutral: '#4B5563',
+                        light: '#F9FAFB',
+                        dark: '#1F2937'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif'],
+                    },
+                }
+            }
+        }
+    </script>
+    <style type="text/tailwindcss">
+        @layer utilities {
+            .content-auto { content-visibility: auto; }
+            .form-focus { @apply focus:ring-2 focus:ring-primary/50 focus:border-primary focus:outline-none; }
+            .card-hover { @apply transition-all duration-300 hover:shadow-lg; }
+            .btn-effect { @apply transform transition-transform duration-200 active:scale-95; }
+            .preview-editable { @apply border border-gray-300 rounded px-2 py-1 focus:border-primary focus:ring-1 focus:ring-primary focus:outline-none; }
+            .quotation-shadow { box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08); }
+            .product-card { @apply bg-white rounded-xl shadow p-5 card-hover mb-6 relative overflow-hidden; }
+            .product-header { @apply text-lg font-semibold mb-4 flex items-center text-primary pb-2 border-b border-gray-100; }
+            .delete-btn { @apply absolute top-3 right-3 text-gray-400 hover:text-accent transition-colors p-1 opacity-0 group-hover:opacity-100; }
+            .image-preview { @apply w-full h-40 bg-gray-100 rounded-lg flex items-center justify-center border-2 border-dashed border-gray-300 overflow-hidden; }
+            .image-preview img { @apply w-full h-full object-contain; }
+            .invoice-table th, .invoice-table td { @apply border border-gray-300 py-2 px-3 relative; }
+            .invoice-table th { @apply bg-gray-50 font-medium text-gray-700 select-none; }
+            .invoice-table th.resizable { position: relative; }
+            .invoice-table th .resizer { position: absolute; top: 0; right: 0; width: 5px; height: 100%; cursor: col-resize; user-select: none; touch-action: none; z-index: 10; }
+            .invoice-table th .resizer:hover, .invoice-table th .resizer.resizing { background-color: #165DFF; }
+            .invoice-image-cell { @apply w-32 h-24 flex items-center justify-center; }
+            .invoice-image-cell img { @apply max-w-full max-h-full object-contain; }
+            .model-form-container { @apply mt-4 overflow-hidden transition-all duration-300; }
+            .dragging { user-select: none; -webkit-user-select: none; -moz-user-select: none; -ms-user-select: none; }
+        }
+    </style>
+    
+    <!-- ===== Airtable配置 - 请填写你的信息 ===== -->
+    <script>
+        const AIRTABLE_CONFIG = {
+            token: 'patXXXXXXXXXXXXXX',      // 你的个人访问令牌（以pat开头）
+            baseId: 'appXXXXXXXXXXXXXX',     // 你的BaseID（从URL获取）
+            tableName: '报价记录'              // 你的表格名称
+        };
+    </script>
+</head>
+<body class="bg-gray-50 font-sans text-gray-800 min-h-screen">
+    <div class="container mx-auto px-4 py-6 max-w-6xl">
+        <!-- 页面标题 -->
+        <header class="mb-6 text-center">
+            <h1 class="text-[clamp(1.5rem,4vw,2.2rem)] font-bold text-dark mb-1">多产品报价单系统</h1>
+            <p class="text-gray-600 text-sm md:text-base">专业报价 · 自动保存 · 云端同步</p>
+        </header>
+
+        <!-- 主要内容区 -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            <!-- 左侧：报价单表单 -->
+            <div class="lg:col-span-7 space-y-6">
+                <!-- 客户信息区块 -->
+                <div class="bg-white rounded-xl shadow p-5 card-hover">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-lg font-semibold flex items-center text-primary">
+                            <i class="fa fa-user-circle mr-2"></i>客户信息
+                        </h2>
+                        <!-- 保存按钮 -->
+                        <div class="flex gap-2">
+                            <button id="saveQuotationBtn" class="text-sm bg-secondary hover:bg-secondary/90 text-white px-3 py-1.5 rounded flex items-center btn-effect">
+                                <i class="fa fa-save mr-1"></i>保存报价单
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="space-y-4">
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label for="salesman" class="block text-sm font-medium text-gray-700 mb-1">1. 业务员</label>
+                                <select id="salesman" name="salesman" class="w-full px-3 py-2 border border-gray-300 rounded-lg form-focus">
+                                    <option value="">请选择业务员</option>
+                                    <option value="Alan">Alan</option>
+                                    <option value="Leon">Leon</option>
+                                    <option value="Oscar">Oscar</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label for="invoiceNumber" class="block text-sm font-medium text-gray-700 mb-1">2. 发票编号</label>
+                                <input type="text" id="invoiceNumber" name="invoiceNumber" class="w-full px-3 py-2 border border-gray-300 rounded-lg form-focus">
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label for="invoiceDate" class="block text-sm font-medium text-gray-700 mb-1">3. 发票日期</label>
+                                <input type="date" id="invoiceDate" name="invoiceDate" class="w-full px-3 py-2 border border-gray-300 rounded-lg form-focus">
+                            </div>
+                            <div>
+                                <label for="customerName" class="block text-sm font-medium text-gray-700 mb-1">4. 客户名称</label>
+                                <input type="text" id="customerName" name="customerName" class="w-full px-3 py-2 border border-gray-300 rounded-lg form-focus">
+                            </div>
+                        </div>
+
+                        <!-- 联系方式和国家 -->
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label for="customerContact" class="block text-sm font-medium text-gray-700 mb-1">5. 联系方式</label>
+                                <input type="text" id="customerContact" name="customerContact" class="w-full px-3 py-2 border border-gray-300 rounded-lg form-focus" placeholder="电话/邮箱/WhatsApp">
+                            </div>
+                            <div>
+                                <label for="customerCountry" class="block text-sm font-medium text-gray-700 mb-1">6. 国家</label>
+                                <input type="text" id="customerCountry" name="customerCountry" class="w-full px-3 py-2 border border-gray-300 rounded-lg form-focus" placeholder="例如：美国、英国">
+                            </div>
+                        </div>
+
+                        <div>
+                            <label for="customerAddress" class="block text-sm font-medium text-gray-700 mb-1">7. 客户地址</label>
+                            <textarea id="customerAddress" name="customerAddress" rows="2" class="w-full px-3 py-2 border border-gray-300 rounded-lg form-focus"></textarea>
+                        </div>
+
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">8. 付款凭证</label>
+                            <div class="image-preview relative" id="paymentPreview">
+                                <label for="paymentImage" class="cursor-pointer text-center px-4">
+                                    <i class="fa fa-upload text-gray-400 text-xl block mb-1"></i>
+                                    <span class="text-gray-500 text-sm">点击上传图片</span>
+                                </label>
+                                <input type="file" id="paymentImage" name="paymentImage" accept="image/*" class="hidden">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 产品容器 -->
+                <div id="productsContainer">
+                    <!-- 产品表单将通过JavaScript动态生成 -->
+                </div>
+
+                <!-- 新增产品按钮 -->
+                <button id="addProductBtn" class="w-full bg-secondary hover:bg-secondary/90 text-white font-medium py-3 px-4 rounded-lg transition duration-300 flex items-center justify-center btn-effect">
+                    <i class="fa fa-plus mr-2"></i>新增产品
+                </button>
+
+                <!-- 运输与总价信息 -->
+                <div class="bg-white rounded-xl shadow p-5 card-hover">
+                    <h2 class="text-lg font-semibold mb-4 flex items-center text-primary">
+                        <i class="fa fa-truck mr-2"></i>运输与总价信息
+                    </h2>
+                    
+                    <div class="space-y-4">
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div class="grid grid-cols-2 gap-3">
+                                <div class="col-span-1">
+                                    <label for="shippingFee" class="block text-sm font-medium text-gray-700 mb-1">9. 运费 ($)</label>
+                                    <input type="number" id="shippingFee" name="shippingFee" min="0" step="0.01" class="w-full px-3 py-2 border border-gray-300 rounded-lg form-focus">
+                                </div>
+                                <div class="col-span-1">
+                                    <label for="shippingFeeDiv6" class="block text-sm font-medium text-gray-700 mb-1">运费 (￥)</label>
+                                    <input type="number" id="shippingFeeDiv6" name="shippingFeeDiv6" readonly step="0.01" class="w-full px-3 py-2 border border-gray-300 bg-gray-50 rounded-lg cursor-not-allowed">
+                                </div>
+                            </div>
+                            <div>
+                                <label for="customsClearance" class="block text-sm font-medium text-gray-700 mb-1">10. 清关方式</label>
+                                <input type="text" id="customsClearance" name="customsClearance" class="w-full px-3 py-2 border border-gray-300 rounded-lg form-focus">
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label for="shippingCost" class="block text-sm font-medium text-gray-700 mb-1">11. 运费成本</label>
+                                <input type="number" id="shippingCost" name="shippingCost" min="0" step="0.01" class="w-full px-3 py-2 border border-gray-300 rounded-lg form-focus">
+                            </div>
+                            <div>
+                                <label for="totalPrice" class="block text-sm font-medium text-gray-700 mb-1">12. 总价 ($)</label>
+                                <input type="number" id="totalPrice" name="totalPrice" readonly="" step="0.01" class="w-full px-3 py-2 border border-gray-300 bg-gray-50 rounded-lg cursor-not-allowed">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 报价记录搜索 -->
+                <div class="bg-white rounded-xl shadow p-5 card-hover">
+                    <h2 class="text-lg font-semibold mb-4 flex items-center text-primary">
+                        <i class="fa fa-search mr-2"></i>搜索历史报价
+                    </h2>
+                    <div class="flex gap-2">
+                        <input type="text" id="searchQuotationInput" placeholder="输入客户名称搜索..." class="flex-1 px-3 py-2 border border-gray-300 rounded-lg form-focus">
+                        <button id="searchQuotationBtn" class="bg-primary hover:bg-primary/90 text-white font-medium px-4 py-2 rounded-lg transition duration-300 flex items-center btn-effect">
+                            <i class="fa fa-search mr-2"></i>搜索
+                        </button>
+                    </div>
+                    <!-- 搜索结果 -->
+                    <div id="searchResults" class="mt-2 max-h-60 overflow-y-auto border border-gray-200 rounded-lg bg-white shadow-lg" style="display: none;">
+                    </div>
+                </div>
+
+                <!-- 操作按钮区 -->
+                <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <button id="exportBtn" class="bg-primary hover:bg-primary/90 text-white font-medium py-3 px-4 rounded-lg transition duration-300 flex items-center justify-center btn-effect">
+                        <i class="fa fa-cloud-download mr-2"></i>导出报价
+                    </button>
+                    <button id="importBtn" class="bg-neutral hover:bg-neutral/90 text-white font-medium py-3 px-4 rounded-lg transition duration-300 flex items-center justify-center btn-effect">
+                        <i class="fa fa-cloud-upload mr-2"></i>导入报价
+                    </button>
+                    <button id="resetBtn" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-medium py-3 px-4 rounded-lg transition duration-300 flex items-center justify-center btn-effect">
+                        <i class="fa fa-refresh mr-2"></i>重置
+                    </button>
+                    <button id="previewBtn" class="bg-secondary hover:bg-secondary/90 text-white font-medium py-3 px-4 rounded-lg transition duration-300 flex items-center justify-center btn-effect">
+                        <i class="fa fa-eye mr-2"></i>预览
+                    </button>
+                </div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-0">
+                     <button id="previewInvoiceBtn" class="bg-primary hover:bg-primary/90 text-white font-medium py-3 px-4 rounded-lg transition duration-300 flex items-center justify-center btn-effect">
+                        <i class="fa fa-file-text-o mr-2"></i>预览发票
+                    </button>
+                </div>
+                
+                <!-- 隐藏的文件输入框用于导入 -->
+                <input type="file" id="importFileInput" accept=".json" class="hidden">
+            </div>
+
+            <!-- 右侧：计算结果和型号对照表 -->
+            <div class="lg:col-span-5 space-y-6">
+                <!-- 利润计算结果 -->
+                <div class="bg-white rounded-xl shadow p-5 card-hover">
+                    <h2 class="text-lg font-semibold mb-4 flex items-center text-primary">
+                        <i class="fa fa-bar-chart mr-2"></i>利润计算结果
+                    </h2>
+                    
+                    <div class="space-y-4">
+                        <div class="p-3 bg-gradient-to-r from-secondary/10 to-secondary/5 rounded-lg border border-secondary/20">
+                            <div class="text-sm text-gray-600 mb-1">13. 所有产品总利润</div>
+                            <div id="allProductsProfit" class="text-2xl font-bold text-secondary">0.00</div>
+                        </div>
+                        
+                        <div class="p-3 bg-gray-50 rounded-lg border border-gray-100">
+                            <div class="text-sm text-gray-600 mb-1">14. 运费利润</div>
+                            <div id="shippingProfit" class="text-xl font-semibold text-gray-800">0.00</div>
+                        </div>
+                        
+                        <div class="p-3 bg-gradient-to-r from-primary/10 to-primary/5 rounded-lg border border-primary/20">
+                            <div class="text-sm text-gray-600 mb-1">15. 预估总利润</div>
+                            <div id="totalProfit" class="text-2xl font-bold text-primary">0.00</div>
+                        </div>
+                        
+                        <div class="p-3 bg-gray-50 rounded-lg border border-gray-100">
+                            <div class="text-sm text-gray-600 mb-1">16. 预估利润率</div>
+                            <div id="profitMargin" class="text-xl font-semibold text-gray-800">0.00%</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 型号成本对照表 -->
+                <div class="bg-white rounded-xl shadow p-5 card-hover">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-lg font-semibold flex items-center text-primary">
+                            <i class="fa fa-table mr-2"></i>型号成本对照表
+                        </h2>
+                        <button id="addModelBtn" class="text-sm bg-primary hover:bg-primary/90 text-white px-3 py-1 rounded flex items-center btn-effect">
+                            <i class="fa fa-plus mr-1"></i>新增型号
+                        </button>
+                    </div>
+                    
+                    <!-- 新增型号表单 -->
+                    <div id="addModelForm" class="model-form-container hidden mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
+                        <div class="grid grid-cols-1 gap-3">
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <div>
+                                    <label for="newModelName" class="block text-xs font-medium text-gray-700 mb-1">型号名称</label>
+                                    <input type="text" id="newModelName" class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-lg form-focus">
+                                </div>
+                                <div>
+                                    <label for="newModelCost" class="block text-xs font-medium text-gray-700 mb-1">成本价格</label>
+                                    <input type="number" id="newModelCost" min="0" step="0.01" class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-lg form-focus">
+                                </div>
+                            </div>
+                            <div>
+                                <label for="newModelFabric" class="block text-xs font-medium text-gray-700 mb-1">面料信息</label>
+                                <input type="text" id="newModelFabric" class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-lg form-focus">
+                            </div>
+                            <div>
+                                <label for="newModelFabricEn" class="block text-xs font-medium text-gray-700 mb-1">面料英文（可选）</label>
+                                <input type="text" id="newModelFabricEn" class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded-lg form-focus">
+                            </div>
+                            <div class="flex justify-end gap-2 pt-1">
+                                <button type="button" id="cancelAddModelBtn" class="text-sm px-3 py-1.5 border border-gray-300 rounded hover:bg-gray-100 transition-colors">
+                                    取消
+                                </button>
+                                <button type="button" id="confirmAddModelBtn" class="text-sm px-3 py-1.5 bg-primary text-white rounded hover:bg-primary/90 transition-colors">
+                                    确认添加
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="overflow-y-auto max-h-[300px] pr-1 text-sm">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead>
+                                <tr>
+                                    <th class="py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">型号</th>
+                                    <th class="py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">面料</th>
+                                    <th class="py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">成本</th>
+                                    <th class="py-2 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-100" id="modelCostTable">
+                                <!-- 表格内容将通过JavaScript动态生成 -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 报价单预览区 -->
+        <div id="quotationPreview" class="mt-8 bg-white rounded-xl quotation-shadow p-6 md:p-8 max-w-2xl mx-auto hidden">
+            <div class="text-center mb-8 pb-4 border-b border-gray-200">
+                <h2 class="text-2xl font-bold text-primary mb-2">QUOTATION</h2>
+                <p class="text-gray-500 text-sm mb-1">Professional Apparel Quotation</p>
+                <p class="text-gray-400 text-xs" id="previewDate"></p>
+            </div>
+            
+            <div id="previewProductsContainer" class="space-y-6 mb-8">
+                <!-- 预览产品将通过JavaScript动态生成 -->
+            </div>
+            
+            <div class="space-y-4 mb-8 pt-4 border-t border-gray-200">
+                <div class="flex">
+                    <div class="w-1/3 text-gray-500">Shipping Fee:</div>
+                    <div class="w-2/3 font-medium" id="previewShippingFee" contenteditable="true">-</div>
+                </div>
+                <div class="flex">
+                    <div class="w-1/3 text-gray-500">Customs:</div>
+                    <div class="w-2/3 font-medium" id="previewCustomsClearance" contenteditable="true">-</div>
+                </div>
+                <div class="pt-4 mt-4 border-t border-gray-200">
+                    <div class="flex items-center">
+                        <div class="w-1/3 text-gray-600 font-medium">Total Price:</div>
+                        <div class="w-2/3 font-bold text-lg text-primary" id="previewTotalPrice" contenteditable="true">-</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="text-center mt-8 flex flex-col sm:flex-row justify-center gap-3">
+                <button id="downloadQuotationBtn" class="bg-primary hover:bg-primary/90 text-white font-medium py-3 px-6 rounded-lg transition duration-300 flex items-center justify-center btn-effect shadow-md">
+                    <i class="fa fa-download mr-2"></i>Download Image
+                </button>
+                <button id="downloadQuotationPdfBtn" class="bg-primary hover:bg-primary/90 text-white font-medium py-3 px-6 rounded-lg transition duration-300 flex items-center justify-center btn-effect shadow-md">
+                    <i class="fa fa-file-pdf-o mr-2"></i>Download PDF
+                </button>
+            </div>
+        </div>
+
+        <!-- 发票预览区 -->
+        <div id="invoicePreview" class="mt-8 bg-white rounded-xl quotation-shadow p-6 md:p-8 max-w-4xl mx-auto hidden">
+            <div class="text-center mb-8 pb-4 border-b border-gray-300">
+                <h2 class="text-3xl font-bold text-dark mb-1">形式发票</h2>
+                <p class="text-xl text-gray-600">PROFORMA INVOICE</p>
+            </div>
+            
+            <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-3">
+                <div>
+                    <div class="text-sm text-gray-500">发票编号 / Invoice No:</div>
+                    <div class="font-medium" id="invoiceInvoiceNumber" contenteditable="true">-</div>
+                </div>
+                <div>
+                    <div class="text-sm text-gray-500">日期 / Date:</div>
+                    <div class="font-medium" id="invoiceInvoiceDate" contenteditable="true">-</div>
+                </div>
+            </div>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+                <div>
+                    <div class="font-medium mb-2 text-gray-800">卖方 / Seller:</div>
+                    <div id="invoiceSellerInfo" class="text-sm space-y-1">-</div>
+                </div>
+                <div>
+                    <div class="font-medium mb-2 text-gray-800">买方 / Buyer:</div>
+                    <div id="invoiceBuyerInfo" class="text-sm space-y-1" contenteditable="true">
+                        <div id="invoiceCustomerName">[Customer Name]</div>
+                        <div id="invoiceCustomerAddress">[Customer Address]</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="mb-8 p-4 bg-gray-50 rounded-lg">
+                <div class="font-medium mb-3 text-gray-800">运输信息 / Shipping Information</div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                    <div>
+                        <div class="text-gray-500">运输方式 / Transport:</div>
+                        <select id="invoiceShippingMethod" class="preview-editable mt-1 w-auto">
+                            <option value="Air Transport">Air Transport</option>
+                            <option value="Land Transport">Land Transport</option>
+                            <option value="Sea Transport">Sea Transport</option>
+                        </select>
+                    </div>
+                    <div>
+                        <div class="text-gray-500">清关方式 / Customs Clearance:</div>
+                        <div id="invoiceCustomsClearance" contenteditable="true" class="preview-editable">-</div>
+                    </div>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm mt-4">
+                    <div>
+                        <div class="text-gray-500">付款方式 / Payment Method:</div>
+                        <div id="invoicePaymentMethod" contenteditable="true" class="preview-editable">T/T</div>
+                    </div>
+                    <div>
+                        <div class="text-gray-500">发货时间 / Delivery Time:</div>
+                        <div class="flex items-center preview-editable">
+                            Within <span id="deliveryDays" contenteditable="true" class="mx-1 min-w-[2rem] text-center">20</span> days after get payment
+                        </div>
+                    </div>
+                </div>
+                <div class="mt-4 text-xs text-gray-600 border-t border-gray-200 pt-4">
+                    <p class="mb-1"><strong>DAP:</strong> Seller delivers to place (ready to unload); buyer does clearance, duties, unloading.</p>
+                    <p><strong>DDP:</strong> Seller handles all (delivery, clearance, duties); buyer just receives goods.</p>
+                </div>
+            </div>
+            
+            <div class="mb-8">
+                <table class="min-w-full border-collapse invoice-table" id="invoiceTable">
+                    <thead>
+                        <tr>
+                            <th class="text-center resizable">序号<br>S/N</th>
+                            <th class="resizable">型号<br>Model</th>
+                            <th class="resizable" style="width: 15%;">描述<br>Description</th>
+                            <th class="text-center resizable">图片<br>Image</th>
+                            <th class="text-center resizable">价格 (USD)<br>Price</th>
+                            <th class="text-center resizable">数量<br>Quantity</th>
+                            <th class="text-center resizable">金额 (USD)<br>Amount</th>
+                            <th class="resizable">备注<br>Remarks</th>
+                        </tr>
+                    </thead>
+                    <tbody id="invoiceProductsTable">
+                        <!-- 产品内容将通过JavaScript动态生成 -->
+                    </tbody>
+                </table>
+            </div>
+            
+            <div class="flex flex-col items-end mb-8">
+                <div class="w-full md:w-1/3 space-y-2 text-right">
+                    <div class="flex justify-between">
+                        <span class="text-gray-600">商品总额 / Subtotal:</span>
+                        <span id="invoiceSubtotal" class="font-medium">$0.00</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-gray-600">运费 / Shipping Fee:</span>
+                        <span id="invoiceShippingFee" class="font-medium">$0.00</span>
+                    </div>
+                    <div class="flex justify-between pt-2 border-t border-gray-300 mt-2">
+                        <span class="font-medium">总计 / Total (USD):</span>
+                        <span id="invoiceTotal" class="font-bold text-lg text-primary">$0.00</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="mt-8 pt-6 border-t border-gray-300">
+                <div class="font-medium mb-3 text-gray-800 text-center">支付凭证 / Payment Voucher</div>
+                <div id="invoicePaymentVoucher" class="image-preview h-60 mx-auto max-w-2xl">
+                    <span class="text-gray-500">未上传付款凭证图片</span>
+                </div>
+            </div>
+            
+            <div class="text-center mt-8 flex flex-col sm:flex-row justify-center gap-3">
+                <button id="downloadInvoiceBtn" class="bg-primary hover:bg-primary/90 text-white font-medium py-3 px-6 rounded-lg transition duration-300 flex items-center justify-center btn-effect shadow-md">
+                    <i class="fa fa-download mr-2"></i>Download Image
+                </button>
+                <button id="downloadInvoicePdfBtn" class="bg-primary hover:bg-primary/90 text-white font-medium py-3 px-6 rounded-lg transition duration-300 flex items-center justify-center btn-effect shadow-md">
+                    <i class="fa fa-file-pdf-o mr-2"></i>Download PDF
+                </button>
+            </div>
+        </div>
+
+        <!-- 模态框区域 -->
+        <div id="imageModal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50 hidden">
+            <div class="bg-white p-4 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-auto">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="font-semibold text-lg text-gray-800">报价单预览</h3>
+                    <button id="closeModal" class="text-gray-500 hover:text-gray-800"><i class="fa fa-times text-xl"></i></button>
+                </div>
+                <div id="imagePreviewContainer" class="flex justify-center">
+                    <img id="generatedImage" src="" alt="报价单图片预览" class="max-w-full h-auto shadow-lg">
+                </div>
+            </div>
+        </div>
+
+        <div id="invoiceImageModal" class="fixed inset-0 bg-black/70 flex items-center justify-center z-50 hidden">
+            <div class="bg-white p-4 rounded-lg max-w-3xl w-full max-h-[90vh] overflow-auto">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="font-semibold text-lg text-gray-800">发票预览</h3>
+                    <button id="closeInvoiceModal" class="text-gray-500 hover:text-gray-800"><i class="fa fa-times text-xl"></i></button>
+                </div>
+                <div id="invoiceImageContainer" class="flex justify-center">
+                    <img id="generatedInvoiceImage" src="" alt="发票图片预览" class="max-w-full h-auto shadow-lg">
+                </div>
+            </div>
+        </div>
+
+        <div id="imageViewerModal" class="fixed inset-0 bg-black/90 flex items-center justify-center z-50 hidden">
+            <button id="closeImageViewer" class="absolute top-4 right-4 text-white text-2xl hover:text-gray-300"><i class="fa fa-times"></i></button>
+            <div class="max-w-4xl max-h-[80vh]">
+                <img id="imageViewer" src="" alt="图片查看" class="max-w-full max-h-[80vh] object-contain">
+            </div>
+        </div>
+
+        <div id="confirmDeleteModal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 hidden">
+            <div class="bg-white p-6 rounded-lg max-w-md w-full">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="font-semibold text-lg text-gray-800">确认删除</h3>
+                    <button id="closeDeleteModal" class="text-gray-500 hover:text-gray-800"><i class="fa fa-times"></i></button>
+                </div>
+                <div class="mb-5">
+                    <p class="text-gray-600">确定要删除型号 <span id="deleteModelName" class="font-medium text-accent"></span> 吗？</p>
+                </div>
+                <div class="flex justify-end gap-3">
+                    <button id="cancelDeleteBtn" class="px-4 py-2 border border-gray-300 rounded hover:bg-gray-100 transition-colors">取消</button>
+                    <button id="confirmDeleteBtn" class="px-4 py-2 bg-accent text-white rounded hover:bg-accent/90 transition-colors">确认删除</button>
+                </div>
+            </div>
+        </div>
+
+        <footer class="mt-10 text-center text-gray-500 text-sm py-4">
+            <p>多产品报价单系统 © 2023 - Airtable自动保存版</p>
+        </footer>
+    </div>
+
+    <script>
+        // 翻译映射表
+        const translationMap = {
+            "男": "Men's", "女": "Women's", "童": "Kids'", "成人": "Adult", "儿童": "Children",
+            "长袖": "Long Sleeve", "短袖": "Short Sleeve", "圆领": "Crew Neck", "连帽": "Hooded",
+            "拉链": "Zipper", "印花": "Print", "绣花": "Embroidery", "图案": "Pattern", "标志": "Logo",
+            "文字": "Text", "左胸": "Left Chest", "右胸": "Right Chest", "后背": "Back", "正面": "Front",
+            "反面": "Back", "定制": "Custom", "定做": "Custom Made", "批量": "Bulk", "订单": "Order",
+            "款": "Style", "号": "Size", "黑": "Black", "白": "White", "红": "Red", "蓝": "Blue",
+            "绿": "Green", "黄": "Yellow", "紫": "Purple", "粉": "Pink", "灰": "Gray", "棕": "Brown",
+            "橙": "Orange", "一": "One", "二": "Two", "三": "Three", "四": "Four", "五": "Five",
+            "六": "Six", "七": "Seven", "八": "Eight", "九": "Nine", "十": "Ten", "公司": "Company",
+            "团队": "Team", "活动": "Event", "聚会": "Party", "周年": "Anniversary", "庆典": "Celebration",
+            "限定": "Limited", "特别": "Special", "纪念": "Commemoration"
+        };
+
+        // 默认型号数据
+        let modelData = JSON.parse(localStorage.getItem('customModelData')) || {
+            "1708-305g": { fabric: "305g", cost: 39, fabricEn: "305g", isDefault: true },
+            "1309-190g": { fabric: "190g", cost: 30, fabricEn: "190g", isDefault: true },
+            "8801-190g": { fabric: "190g", cost: 30, fabricEn: "190g", isDefault: true },
+            "AR002-230g": { fabric: "230g", cost: 35, fabricEn: "230g", isDefault: true },
+            "AR009-245g": { fabric: "245g", cost: 35, fabricEn: "245g", isDefault: true },
+            "T080-280g水洗": { fabric: "280g水洗", cost: 30, fabricEn: "280g Washed", isDefault: true },
+            "T082-280g水洗脏洗": { fabric: "280g水洗脏洗", cost: 31, fabricEn: "280g Washed and Dirty Washed", isDefault: true },
+            "T084-280g水洗蜡染": { fabric: "280g水洗蜡染", cost: 35, fabricEn: "280g Washed Wax-dyed Fabric", isDefault: true },
+            "T090-320g索罗纳": { fabric: "320g索罗纳", cost: 34, fabricEn: "320g Sorona", isDefault: true },
+            "UT01-220g水洗": { fabric: "220g水洗", cost: 27, fabricEn: "220g Washed", isDefault: true },
+            "UT245400-245g速干": { fabric: "245g速干", cost: 27, fabricEn: "245g quick-dry", isDefault: true },
+            "T200000-200g": { fabric: "200g", cost: 19, fabricEn: "200g", isDefault: true },
+            "T235000-235g": { fabric: "235g", cost: 24, fabricEn: "235g", isDefault: true },
+            "T240300-240g16支": { fabric: "240g16支", cost: 22, fabricEn: "240g 16s Yarn", isDefault: true },
+            "T275500-275g": { fabric: "275g", cost: 28, fabricEn: "275g", isDefault: true },
+            "T275002-275gPOLO衫": { fabric: "275gPOLO衫", cost: 35, fabricEn: "275g Polo Shirt", isDefault: true },
+            "T310700-310g常规": { fabric: "310g常规", cost: 31, fabricEn: "310g Regular", isDefault: true },
+            "BY70000-180g常规": { fabric: "180g常规", cost: 18.5, fabricEn: "180g Regular", isDefault: true },
+            "BT2666-200g落肩常规": { fabric: "200g落肩常规", cost: 23, fabricEn: "200g Regular Drop Shoulder", isDefault: true },
+            "M061-240g常规": { fabric: "240g常规", cost: 25, fabricEn: "240g regular", isDefault: true },
+            "2318-350g圆领": { fabric: "350g圆领", cost: 55, fabricEn: "350g crew-neck", isDefault: true },
+            "2318-350g连帽": { fabric: "350g连帽", cost: 70, fabricEn: "350g hooded", isDefault: true },
+            "2519-350g连帽拉链": { fabric: "350g连帽拉链", cost: 85, fabricEn: "350g hooded zipper", isDefault: true },
+            "350100-350g圆领": { fabric: "350g圆领", cost: 44, fabricEn: "350g Crew Neck", isDefault: true },
+            "350102-350g连帽": { fabric: "350g连帽", cost: 54, fabricEn: "350g hooded", isDefault: true },
+            "430104-350g连帽拉链": { fabric: "350g连帽拉链", cost: 59, fabricEn: "350g hooded zipper", isDefault: true },
+            "430300-430g毛圈圆领": { fabric: "430g毛圈圆领", cost: 47, fabricEn: "430g cotton crew-neck", isDefault: true },
+            "430302-430g毛圈连帽": { fabric: "430g毛圈连帽", cost: 58, fabricEn: "430g Fleece Hooded", isDefault: true },
+            "430304-430g连帽拉链": { fabric: "430g连帽拉链", cost: 64, fabricEn: "430g hooded zipper", isDefault: true },
+            "430000-430g帽绳": { fabric: "430g帽绳", cost: 69, fabricEn: "430g Drawstring", isDefault: true },
+            "510600-510g圆领": { fabric: "510g圆领", cost: 59, fabricEn: "510g crew-neck", isDefault: true },
+            "510602-510g双扣连帽": { fabric: "510g双扣连帽", cost: 83, fabricEn: "510g double-button hooded", isDefault: true },
+            "W19-330g连帽拉链纯棉": { fabric: "330g连帽拉链纯棉", cost: 66, fabricEn: "330g Hooded zipper Pure Cotton", isDefault: true },
+            "W300-420g毛圈连帽水洗纯棉": { fabric: "420g毛圈连帽水洗纯棉", cost: 73, fabricEn: "420g hooded washed pure cotton", isDefault: true },
+            "W302-420g毛圈圆领水洗纯棉": { fabric: "420g毛圈圆领水洗纯棉", cost: 62, fabricEn: "420g cotton crew-neck", isDefault: true },
+            "2406-345g连帽": { fabric: "345g连帽", cost: 68, fabricEn: "345g Hooded", isDefault: true },
+            "2407-345g圆领": { fabric: "345g圆领", cost: 55, fabricEn: "345g Crew Neck", isDefault: true },
+            "2622-345g帽绳": { fabric: "345g帽绳", cost: 65, fabricEn: "345g Drawcord Hat", isDefault: true },
+            "W251-400g水洗": { fabric: "400g水洗", cost: 102, fabricEn: "400g washed", isDefault: true }
+        };
+
+        const salesmanInfo = {
+            "Alan": { address: "Yiwu Chongpei E-commerce Firm.\nRoom 815, Block 19, Phase II, Luguang International E-commerce City, Chengxi Subdistrict, Yiwu City, Jinhua City, China", email: "alanclothes9095@163.com", contact: "Alan", tel: "+86 19905799095" },
+            "Leon": { address: "Yiwu Chongpei E-commerce Firm.\nRoom 815, Block 19, Phase II, Luguang International E-commerce City, Chengxi Subdistrict, Yiwu City, Jinhua City, China", email: "leonclothes3851@163.com", contact: "Leon", tel: "+86 17815533851" },
+            "Oscar": { address: "Yiwu Chongpei E-commerce Firm.\nRoom 815, Block 19, Phase II, Luguang International E-commerce City, Chengxi Subdistrict, Yiwu City, Jinhua City, China", email: "lazyy_z@163.com", contact: "Oscar", tel: "+86 13175503959" }
+        };
+
+        let productCount = 0;
+        let currentDeleteModel = null;
+        let uploadedImages = { design: {}, payment: null };
+        let isResizing = false, currentResizer = null, startX = 0, startWidth = 0, currentColumn = null;
+
+        // DOM 元素引用
+        const productsContainer = document.getElementById('productsContainer');
+        const addProductBtn = document.getElementById('addProductBtn');
+        const resetBtn = document.getElementById('resetBtn');
+        const previewBtn = document.getElementById('previewBtn');
+        const previewInvoiceBtn = document.getElementById('previewInvoiceBtn');
+        const exportBtn = document.getElementById('exportBtn');
+        const importBtn = document.getElementById('importBtn');
+        const importFileInput = document.getElementById('importFileInput');
+        
+        const downloadQuotationBtn = document.getElementById('downloadQuotationBtn');
+        const downloadQuotationPdfBtn = document.getElementById('downloadQuotationPdfBtn');
+        const downloadInvoiceBtn = document.getElementById('downloadInvoiceBtn');
+        const downloadInvoicePdfBtn = document.getElementById('downloadInvoicePdfBtn');
+        
+        const shippingFeeInput = document.getElementById('shippingFee');
+        const shippingFeeDiv6Input = document.getElementById('shippingFeeDiv6');
+        const customsClearanceInput = document.getElementById('customsClearance');
+        const shippingCostInput = document.getElementById('shippingCost');
+        const totalPriceInput = document.getElementById('totalPrice');
+        
+        const allProductsProfitElement = document.getElementById('allProductsProfit');
+        const shippingProfitElement = document.getElementById('shippingProfit');
+        const totalProfitElement = document.getElementById('totalProfit');
+        const profitMarginElement = document.getElementById('profitMargin');
+        const modelCostTable = document.getElementById('modelCostTable');
+        
+        const quotationPreview = document.getElementById('quotationPreview');
+        const invoicePreview = document.getElementById('invoicePreview');
+        const previewProductsContainer = document.getElementById('previewProductsContainer');
+        const previewShippingFee = document.getElementById('previewShippingFee');
+        const previewCustomsClearance = document.getElementById('previewCustomsClearance');
+        const previewTotalPrice = document.getElementById('previewTotalPrice');
+        const previewDate = document.getElementById('previewDate');
+        
+        const imageModal = document.getElementById('imageModal');
+        const closeModal = document.getElementById('closeModal');
+        const generatedImage = document.getElementById('generatedImage');
+        const invoiceImageModal = document.getElementById('invoiceImageModal');
+        const closeInvoiceModal = document.getElementById('closeInvoiceModal');
+        const generatedInvoiceImage = document.getElementById('generatedInvoiceImage');
+        
+        const salesmanInput = document.getElementById('salesman');
+        const invoiceNumberInput = document.getElementById('invoiceNumber');
+        const invoiceDateInput = document.getElementById('invoiceDate');
+        const customerNameInput = document.getElementById('customerName');
+        const customerAddressInput = document.getElementById('customerAddress');
+        const paymentImageInput = document.getElementById('paymentImage');
+        const paymentPreview = document.getElementById('paymentPreview');
+        
+        const imageViewerModal = document.getElementById('imageViewerModal');
+        const closeImageViewer = document.getElementById('closeImageViewer');
+        const imageViewer = document.getElementById('imageViewer');
+        
+        const invoiceProductsTable = document.getElementById('invoiceProductsTable');
+        const invoiceSubtotal = document.getElementById('invoiceSubtotal');
+        const invoiceShippingFee = document.getElementById('invoiceShippingFee');
+        const invoiceTotal = document.getElementById('invoiceTotal');
+        const invoiceInvoiceNumber = document.getElementById('invoiceInvoiceNumber');
+        const invoiceInvoiceDate = document.getElementById('invoiceInvoiceDate');
+        const invoiceCustomerName = document.getElementById('invoiceCustomerName');
+        const invoiceCustomerAddress = document.getElementById('invoiceCustomerAddress');
+        const invoiceCustomsClearance = document.getElementById('invoiceCustomsClearance');
+        const invoiceSellerInfo = document.getElementById('invoiceSellerInfo');
+        const invoiceShippingMethod = document.getElementById('invoiceShippingMethod');
+        const invoicePaymentVoucher = document.getElementById('invoicePaymentVoucher');
+        const deliveryDays = document.getElementById('deliveryDays');
+        
+        const addModelBtn = document.getElementById('addModelBtn');
+        const addModelForm = document.getElementById('addModelForm');
+        const newModelNameInput = document.getElementById('newModelName');
+        const newModelCostInput = document.getElementById('newModelCost');
+        const newModelFabricInput = document.getElementById('newModelFabric');
+        const newModelFabricEnInput = document.getElementById('newModelFabricEn');
+        const cancelAddModelBtn = document.getElementById('cancelAddModelBtn');
+        const confirmAddModelBtn = document.getElementById('confirmAddModelBtn');
+        
+        const confirmDeleteModal = document.getElementById('confirmDeleteModal');
+        const closeDeleteModal = document.getElementById('closeDeleteModal');
+        const cancelDeleteBtn = document.getElementById('cancelDeleteBtn');
+        const confirmDeleteBtn = document.getElementById('confirmDeleteBtn');
+        const deleteModelNameElement = document.getElementById('deleteModelName');
+        const invoiceTable = document.getElementById('invoiceTable');
+
+        function translatePrinting(text) {
+            if (!text) return "";
+            let translated = text;
+            Object.keys(translationMap).forEach(key => {
+                const regex = new RegExp(`\\b${key}\\b`, 'g');
+                translated = translated.replace(regex, translationMap[key]);
+            });
+            return translated;
+        }
+
+        function handleImageUpload(input, previewElement, imageType, productIndex = null) {
+            const file = input.files[0];
+            if (!file) return;
+            if (!file.type.match('image.*')) { alert('请上传图片文件'); return; }
+            
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                if (imageType === 'design' && productIndex !== null) uploadedImages.design[productIndex] = e.target.result;
+                else if (imageType === 'payment') uploadedImages.payment = e.target.result;
+                
+                previewElement.innerHTML = `
+                    <img src="${e.target.result}" alt="${imageType === 'design' ? '产品效果图' : '付款凭证'}" class="cursor-pointer" data-type="${imageType}" data-index="${productIndex || ''}" />
+                    <button type="button" class="absolute top-2 right-2 bg-black/50 text-white rounded-full p-1 hover:bg-black/70 transition-colors delete-image">
+                        <i class="fa fa-times"></i>
+                    </button>`;
+                
+                const img = previewElement.querySelector('img');
+                img.addEventListener('click', function() {
+                    imageViewer.src = this.src;
+                    imageViewer.alt = this.alt;
+                    imageViewerModal.classList.remove('hidden');
+                });
+                
+                const deleteBtn = previewElement.querySelector('.delete-image');
+                deleteBtn.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    resetImageUpload(input, previewElement, imageType, productIndex);
+                });
+                
+                if (imageType === 'payment') updateInvoicePaymentVoucher();
+                else if (imageType === 'design') updateInvoicePreview();
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function resetImageUpload(input, previewElement, imageType, productIndex = null) {
+            input.value = '';
+            if (imageType === 'design' && productIndex !== null) delete uploadedImages.design[productIndex];
+            else if (imageType === 'payment') uploadedImages.payment = null;
+            
+            const placeholderText = imageType === 'design' ? '点击上传产品效果图' : '点击上传图片';
+            previewElement.innerHTML = `
+                <label for="${input.id}" class="cursor-pointer text-center px-4">
+                    <i class="fa fa-upload text-gray-400 text-xl block mb-1"></i>
+                    <span class="text-gray-500 text-sm">${placeholderText}</span>
+                </label>`;
+            
+            const label = previewElement.querySelector('label');
+            label.addEventListener('click', function() { input.click(); });
+            
+            if (imageType === 'payment') updateInvoicePaymentVoucher();
+            else if (imageType === 'design') updateInvoicePreview();
+        }
+
+        function updateInvoicePaymentVoucher() {
+            if (uploadedImages.payment) {
+                invoicePaymentVoucher.innerHTML = `<img src="${uploadedImages.payment}" alt="支付凭证" class="max-w-full max-h-full object-contain cursor-pointer" />`;
+                invoicePaymentVoucher.querySelector('img').addEventListener('click', function() {
+                    imageViewer.src = this.src;
+                    imageViewer.alt = this.alt;
+                    imageViewerModal.classList.remove('hidden');
+                });
+            } else {
+                invoicePaymentVoucher.innerHTML = `<span class="text-gray-500">未上传付款凭证图片</span>`;
+            }
+        }
+
+        function createProductForm(index) {
+            productCount++;
+            const productId = `product-${index}`;
+            if (!uploadedImages.design[index]) uploadedImages.design[index] = null;
+            
+            const productForm = document.createElement('div');
+            productForm.id = productId;
+            productForm.className = 'product-card group';
+            productForm.dataset.index = index;
+            
+            const productStartNumber = 12;
+            
+            productForm.innerHTML = `
+                <button type="button" class="delete-btn" data-product="${index}"><i class="fa fa-trash-o"></i></button>
+                <div class="product-header"><i class="fa fa-cube mr-2"></i>产品 ${index}</div>
+                <div class="space-y-4">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label for="model-${index}" class="block text-sm font-medium text-gray-700 mb-1">${productStartNumber}. 型号</label>
+                            <select id="model-${index}" name="model" class="w-full px-3 py-2 border border-gray-300 rounded-lg form-focus product-input">
+                                <option value="">请选择型号</option>
+                                ${Object.keys(modelData).map(model => `<option value="${model}">${model}</option>`).join('')}
+                            </select>
+                        </div>
+                        <div>
+                            <label for="printing-${index}" class="block text-sm font-medium text-gray-700 mb-1">${productStartNumber+1}. 描述</label>
+                            <textarea id="printing-${index}" name="printing" rows="3" class="w-full px-3 py-2 border border-gray-300 rounded-lg form-focus product-input resize-vertical"></textarea>
+                            <div class="mt-1 text-xs text-gray-500 flex items-center"><i class="fa fa-language mr-1"></i><span>描述内容将显示在报价单和发票的描述列（按回车可换行）</span></div>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label for="quantity-${index}" class="block text-sm font-medium text-gray-700 mb-1">${productStartNumber+2}. 数量</label>
+                            <input type="number" id="quantity-${index}" name="quantity" min="1" class="w-full px-3 py-2 border border-gray-300 rounded-lg form-focus product-input">
+                        </div>
+                        <div>
+                            <label for="clothesCost-${index}" class="block text-sm font-medium text-gray-700 mb-1">${productStartNumber+3}. 衣服成本</label>
+                            <input type="number" id="clothesCost-${index}" name="clothesCost" readonly class="w-full px-3 py-2 border border-gray-300 bg-gray-50 rounded-lg cursor-not-allowed product-input">
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label for="laborCostPerUnit-${index}" class="block text-sm font-medium text-gray-700 mb-1">${productStartNumber+4}. 单件工费</label>
+                            <input type="number" id="laborCostPerUnit-${index}" name="laborCostPerUnit" min="0" step="0.01" class="w-full px-3 py-2 border border-gray-300 rounded-lg form-focus product-input">
+                        </div>
+                        <div>
+                            <label for="sampleFee-${index}" class="block text-sm font-medium text-gray-700 mb-1">${productStartNumber+5}. 版费</label>
+                            <input type="number" id="sampleFee-${index}" name="sampleFee" min="0" step="0.01" class="w-full px-3 py-2 border border-gray-300 rounded-lg form-focus product-input">
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">${productStartNumber+6}. 单件成本</label>
+                            <div class="grid grid-cols-2 gap-3">
+                                <input type="number" id="unitCost-${index}" name="unitCost" readonly step="0.01" class="w-full px-3 py-2 border border-gray-300 bg-gray-50 rounded-lg cursor-not-allowed product-input">
+                                <input type="number" id="unitCostDiv6-${index}" name="unitCostDiv6" readonly step="0.01" class="w-full px-3 py-2 border border-gray-300 bg-gray-50 rounded-lg cursor-not-allowed product-input" placeholder="$">
+                            </div>
+                        </div>
+                        <div>
+                            <label for="unitPrice-${index}" class="block text-sm font-medium text-gray-700 mb-1">${productStartNumber+7}. 单价 ($)</label>
+                            <input type="number" id="unitPrice-${index}" name="unitPrice" min="0" step="0.01" class="w-full px-3 py-2 border border-gray-300 rounded-lg form-focus product-input">
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label for="clothesTotal-${index}" class="block text-sm font-medium text-gray-700 mb-1">${productStartNumber+8}. 衣服总价 ($)</label>
+                            <input type="number" id="clothesTotal-${index}" name="clothesTotal" readonly step="0.01" class="w-full px-3 py-2 border border-gray-300 bg-gray-50 rounded-lg cursor-not-allowed product-input">
+                        </div>
+                        <div>
+                            <label for="profitPerUnit-${index}" class="block text-sm font-medium text-gray-700 mb-1">${productStartNumber+9}. 单件利润</label>
+                            <input type="number" id="profitPerUnit-${index}" name="profitPerUnit" readonly step="0.01" class="w-full px-3 py-2 border border-gray-300 bg-gray-50 rounded-lg cursor-not-allowed product-input">
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label for="productProfit-${index}" class="block text-sm font-medium text-gray-700 mb-1">${productStartNumber+10}. 产品利润</label>
+                            <input type="number" id="productProfit-${index}" name="productProfit" readonly step="0.01" class="w-full px-3 py-2 border border-gray-300 bg-gray-50 rounded-lg cursor-not-allowed product-input">
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-700 mb-1">产品效果图</label>
+                        <div class="image-preview relative" id="designPreview-${index}">
+                            <label for="designImage-${index}" class="cursor-pointer text-center px-4">
+                                <i class="fa fa-upload text-gray-400 text-xl block mb-1"></i>
+                                <span class="text-gray-500 text-sm">点击上传产品效果图</span>
+                            </label>
+                            <input type="file" id="designImage-${index}" name="designImage" accept="image/*" class="hidden" />
+                        </div>
+                    </div>
+                </div>`;
+            
+            const modelSelect = productForm.querySelector(`#model-${index}`);
+            modelSelect.addEventListener('change', function() {
+                const selectedModel = this.value;
+                const clothesCostInput = document.getElementById(`clothesCost-${index}`);
+                if (selectedModel && modelData[selectedModel]) {
+                    clothesCostInput.value = modelData[selectedModel].cost;
+                } else {
+                    clothesCostInput.value = '';
+                }
+                calculateProductUnitCost(index);
+                calculateProductValues(index);
+                calculateTotalPrice();
+                calculateAllProductsProfit();
+                calculateShippingProfit();
+                calculateTotalProfit();
+                calculateProfitMargin();
+                updateQuotationPreview();
+                updateInvoicePreview();
+            });
+            
+            const designImageInput = productForm.querySelector(`#designImage-${index}`);
+            const designPreview = productForm.querySelector(`#designPreview-${index}`);
+            const designLabel = designPreview.querySelector('label');
+            designLabel.addEventListener('click', function() { designImageInput.click(); });
+            designImageInput.addEventListener('change', function() { handleImageUpload(this, designPreview, 'design', index); });
+            
+            const inputElements = productForm.querySelectorAll('.product-input:not([readonly])');
+            inputElements.forEach(input => {
+                input.addEventListener('input', function() {
+                    calculateProductUnitCost(index);
+                    calculateProductValues(index);
+                    calculateTotalPrice();
+                    calculateAllProductsProfit();
+                    calculateShippingProfit();
+                    calculateTotalProfit();
+                    calculateProfitMargin();
+                    updateQuotationPreview();
+                    updateInvoicePreview();
+                });
+                if (input.type === 'number') {
+                    input.addEventListener('blur', function() { if (this.value) this.value = parseFloat(this.value).toFixed(2); });
+                }
+            });
+            
+            const deleteBtn = productForm.querySelector('.delete-btn');
+            deleteBtn.addEventListener('click', function() {
+                if (productCount > 1 && confirm(`确定要删除产品 ${index} 吗？`)) {
+                    delete uploadedImages.design[index];
+                    productForm.remove();
+                    productCount--;
+                    renumberProducts();
+                    calculateTotalPrice();
+                    calculateAllProductsProfit();
+                    calculateShippingProfit();
+                    calculateTotalProfit();
+                    calculateProfitMargin();
+                    updateQuotationPreview();
+                    updateInvoicePreview();
+                } else if (productCount <= 1) { alert('至少保留一个产品'); }
+            });
+            
+            return productForm;
+        }
+
+        function renumberProducts() {
+            const products = document.querySelectorAll('#productsContainer > div');
+            const oldToNewIndexMap = {};
+            products.forEach((product, index) => {
+                const oldIndex = parseInt(product.dataset.index);
+                const newIndex = index + 1;
+                oldToNewIndexMap[oldIndex] = newIndex;
+                product.dataset.index = newIndex;
+                product.querySelector('.product-header').innerHTML = `<i class="fa fa-cube mr-2"></i>产品 ${newIndex}`;
+                product.querySelector('.delete-btn').dataset.product = newIndex;
+                
+                const elements = product.querySelectorAll('[id], [for]');
+                elements.forEach(el => {
+                    if (el.id) el.id = el.id.replace(`-${oldIndex}`, `-${newIndex}`);
+                    if (el.getAttribute('for')) el.setAttribute('for', el.getAttribute('for').replace(`-${oldIndex}`, `-${newIndex}`));
+                });
+                
+                const designPreview = product.querySelector(`[id^="designPreview-"]`);
+                if (designPreview) {
+                    designPreview.id = `designPreview-${newIndex}`;
+                    const label = designPreview.querySelector('label');
+                    const designImageInput = document.getElementById(`designImage-${newIndex}`);
+                    if (label && designImageInput) {
+                        label.addEventListener('click', function() { designImageInput.click(); });
+                    }
+                }
+            });
+            
+            const newDesignImages = {};
+            Object.keys(uploadedImages.design).forEach(oldIndex => {
+                const newIndex = oldToNewIndexMap[oldIndex];
+                if (newIndex) newDesignImages[newIndex] = uploadedImages.design[oldIndex];
+            });
+            uploadedImages.design = newDesignImages;
+        }
+
+        function calculateProductUnitCost(index) {
+            const clothesCost = parseFloat(document.getElementById(`clothesCost-${index}`).value) || 0;
+            const laborCostPerUnit = parseFloat(document.getElementById(`laborCostPerUnit-${index}`).value) || 0;
+            const sampleFee = parseFloat(document.getElementById(`sampleFee-${index}`).value) || 0;
+            const quantity = parseFloat(document.getElementById(`quantity-${index}`).value) || 1;
+            const unitCost = clothesCost + laborCostPerUnit + (sampleFee / quantity);
+            document.getElementById(`unitCost-${index}`).value = unitCost.toFixed(2);
+            document.getElementById(`unitCostDiv6-${index}`).value = (unitCost / 6).toFixed(2);
+        }
+
+        function calculateProductValues(index) {
+            const quantity = parseFloat(document.getElementById(`quantity-${index}`).value) || 0;
+            const unitPrice = parseFloat(document.getElementById(`unitPrice-${index}`).value) || 0;
+            const sampleFee = parseFloat(document.getElementById(`sampleFee-${index}`).value) || 0;
+            const laborCostPerUnit = parseFloat(document.getElementById(`laborCostPerUnit-${index}`).value) || 0;
+            const clothesCost = parseFloat(document.getElementById(`clothesCost-${index}`).value) || 0;
+            
+            const clothesTotal = quantity * unitPrice;
+            document.getElementById(`clothesTotal-${index}`).value = clothesTotal.toFixed(2);
+            
+            let profitPerUnit = 0;
+            if (quantity > 0) {
+                profitPerUnit = (clothesTotal * 6 - sampleFee - laborCostPerUnit * quantity - clothesCost * quantity) / quantity;
+            }
+            document.getElementById(`profitPerUnit-${index}`).value = profitPerUnit.toFixed(2);
+            document.getElementById(`productProfit-${index}`).value = (profitPerUnit * quantity).toFixed(2);
+        }
+
+        function calculateTotalPrice() {
+            let clothesTotalSum = 0;
+            for (let i = 1; i <= productCount; i++) {
+                clothesTotalSum += parseFloat(document.getElementById(`clothesTotal-${i}`).value) || 0;
+            }
+            const shippingFee = parseFloat(shippingFeeInput.value) || 0;
+            totalPriceInput.value = (clothesTotalSum + shippingFee).toFixed(2);
+            shippingFeeDiv6Input.value = (shippingFee * 6).toFixed(2);
+        }
+
+        function calculateAllProductsProfit() {
+            let allProductsProfit = 0;
+            for (let i = 1; i <= productCount; i++) {
+                allProductsProfit += parseFloat(document.getElementById(`productProfit-${i}`).value) || 0;
+            }
+            allProductsProfitElement.textContent = allProductsProfit.toFixed(2);
+            return allProductsProfit;
+        }
+
+        function calculateShippingProfit() {
+            const shippingFee = parseFloat(shippingFeeInput.value) || 0;
+            const shippingCost = parseFloat(shippingCostInput.value) || 0;
+            const shippingProfit = shippingFee * 6 - shippingCost;
+            shippingProfitElement.textContent = shippingProfit.toFixed(2);
+            return shippingProfit;
+        }
+
+        function calculateTotalProfit() {
+            const allProductsProfit = calculateAllProductsProfit();
+            const shippingProfit = calculateShippingProfit();
+            const totalProfit = allProductsProfit + shippingProfit;
+            totalProfitElement.textContent = totalProfit.toFixed(2);
+            return totalProfit;
+        }
+
+        function calculateProfitMargin() {
+            const totalProfit = parseFloat(totalProfitElement.textContent) || 0;
+            const totalPrice = parseFloat(totalPriceInput.value) || 0;
+            let profitMargin = 0;
+            if (totalPrice > 0) profitMargin = (totalProfit / 6 / totalPrice) * 100;
+            profitMarginElement.textContent = profitMargin.toFixed(2) + '%';
+        }
+
+        function addNewProduct() {
+            const newIndex = productCount + 1;
+            const newProductForm = createProductForm(newIndex);
+            productsContainer.appendChild(newProductForm);
+            newProductForm.classList.add('scale-95', 'opacity-0');
+            setTimeout(() => newProductForm.classList.remove('scale-95', 'opacity-0'), 10);
+            newProductForm.scrollIntoView({ behavior: 'smooth', block: 'end' });
+        }
+
+        function updateQuotationPreview() {
+            previewDate.textContent = `Date: ${new Date().toLocaleDateString()}`;
+            previewShippingFee.textContent = shippingFeeInput.value ? `$${parseFloat(shippingFeeInput.value).toFixed(2)}` : '-';
+            previewCustomsClearance.textContent = customsClearanceInput.value || '-';
+            previewTotalPrice.textContent = totalPriceInput.value ? `$${totalPriceInput.value}` : '-';
+            previewProductsContainer.innerHTML = '';
+            
+            for (let i = 1; i <= productCount; i++) {
+                const model = document.getElementById(`model-${i}`).value;
+                const fabric = model && modelData[model] ? modelData[model].fabricEn : '-';
+                const printing = document.getElementById(`printing-${i}`).value || '';
+                const translatedPrinting = printing ? translatePrinting(printing) : '-';
+                const quantity = document.getElementById(`quantity-${i}`).value || '-';
+                const unitPrice = document.getElementById(`unitPrice-${i}`).value ? `$${parseFloat(document.getElementById(`unitPrice-${i}`).value).toFixed(2)}` : '-';
+                const clothesTotal = document.getElementById(`clothesTotal-${i}`).value ? `$${document.getElementById(`clothesTotal-${i}`).value}` : '-';
+                
+                const productPreview = document.createElement('div');
+                productPreview.className = 'pb-4 border-b border-gray-100 last:border-0 last:pb-0';
+                productPreview.innerHTML = `
+                    <h3 class="font-semibold text-primary mb-3">Product ${i}</h3>
+                    <div class="grid grid-cols-2 gap-y-2 gap-x-4 text-sm">
+                        <div class="text-gray-500">Model:</div><div class="font-medium">${model || '-'}</div>
+                        <div class="text-gray-500">Fabric:</div><div class="font-medium">${fabric}</div>
+                        <div class="text-gray-500">Description:</div><div class="font-medium">${translatedPrinting}</div>
+                        <div class="text-gray-500">Quantity:</div><div class="font-medium">${quantity}</div>
+                        <div class="text-gray-500">Unit Price:</div><div class="font-medium">${unitPrice}</div>
+                        <div class="text-gray-500">Total:</div><div class="font-medium">${clothesTotal}</div>
+                    </div>`;
+                previewProductsContainer.appendChild(productPreview);
+            }
+        }
+
+        function updateInvoicePreview() {
+            const salesman = salesmanInput.value;
+            if (salesman && salesmanInfo[salesman]) {
+                const info = salesmanInfo[salesman];
+                invoiceSellerInfo.innerHTML = `${info.address.replace(/\n/g, '<br>')}<br>E-mail: ${info.email}<br>Contact: ${info.contact}<br>TEL: ${info.tel}`;
+            } else {
+                invoiceSellerInfo.innerHTML = `Yiwu Chongpei E-commerce Firm.<br>Room 815, Block 19, Phase II, Luguang International E-commerce City,<br>Chengxi Subdistrict, Yiwu City, Jinhua City, China<br>E-mail: -<br>Contact: -<br>TEL: -`;
+            }
+            
+            if (salesman && invoiceNumberInput.value) invoiceInvoiceNumber.textContent = `${salesman}-${invoiceNumberInput.value}`;
+            else if (salesman) invoiceInvoiceNumber.textContent = `${salesman}-`;
+            else if (invoiceNumberInput.value) invoiceInvoiceNumber.textContent = invoiceNumberInput.value;
+            else invoiceInvoiceNumber.textContent = '-';
+            
+            const invoiceDate = invoiceDateInput.value ? new Date(invoiceDateInput.value).toLocaleDateString() : new Date().toLocaleDateString();
+            invoiceInvoiceDate.textContent = invoiceDate;
+            invoiceCustomerName.textContent = customerNameInput.value || '[Customer Name]';
+            invoiceCustomerAddress.textContent = customerAddressInput.value || '[Customer Address]';
+            invoiceCustomsClearance.textContent = customsClearanceInput.value || '-';
+            
+            const shippingFee = shippingFeeInput.value ? `$${parseFloat(shippingFeeInput.value).toFixed(2)}` : '$0.00';
+            invoiceShippingFee.textContent = shippingFee;
+            
+            let subtotal = 0;
+            for (let i = 1; i <= productCount; i++) subtotal += parseFloat(document.getElementById(`clothesTotal-${i}`).value) || 0;
+            invoiceSubtotal.textContent = `$${subtotal.toFixed(2)}`;
+            
+            const totalPrice = totalPriceInput.value ? `$${totalPriceInput.value}` : '$0.00';
+            invoiceTotal.textContent = totalPrice;
+            
+            invoiceProductsTable.innerHTML = '';
+            for (let i = 1; i <= productCount; i++) {
+                const model = document.getElementById(`model-${i}`).value || '-';
+                const description = document.getElementById(`printing-${i}`).value || '';
+                const translatedDescription = translatePrinting(description);
+                const imageHtml = uploadedImages.design[i] 
+                    ? `<img src="${uploadedImages.design[i]}" alt="Product ${i} Image" class="max-w-full max-h-full object-contain" />`
+                    : '<span class="text-gray-500 text-xs">无图片</span>';
+                const quantity = document.getElementById(`quantity-${i}`).value || '-';
+                const unitPrice = document.getElementById(`unitPrice-${i}`).value ? `$${parseFloat(document.getElementById(`unitPrice-${i}`).value).toFixed(2)}` : '-';
+                const clothesTotal = document.getElementById(`clothesTotal-${i}`).value ? `$${document.getElementById(`clothesTotal-${i}`).value}` : '-';
+                
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td class="text-center">${i}</td>
+                    <td>${model}</td>
+                    <td contenteditable="true" class="preview-editable">${translatedDescription}</td>
+                    <td class="invoice-image-cell">${imageHtml}</td>
+                    <td class="text-center">${unitPrice}</td>
+                    <td class="text-center">${quantity}</td>
+                    <td class="text-center">${clothesTotal}</td>
+                    <td contenteditable="true" class="preview-editable"></td>`;
+                invoiceProductsTable.appendChild(row);
+            }
+            if (productCount === 0) {
+                const emptyRow = document.createElement('tr');
+                emptyRow.innerHTML = `<td colspan="8" class="text-center py-4 text-gray-500">暂无产品数据 / No product data</td>`;
+                invoiceProductsTable.appendChild(emptyRow);
+            }
+            updateInvoicePaymentVoucher();
+            initTableResizer();
+        }
+
+        function initTableResizer() {
+            const headers = invoiceTable.querySelectorAll('th.resizable');
+            headers.forEach(header => {
+                const existingResizer = header.querySelector('.resizer');
+                if (existingResizer) existingResizer.remove();
+                const resizer = document.createElement('div');
+                resizer.className = 'resizer';
+                header.appendChild(resizer);
+                resizer.addEventListener('mousedown', initResize);
+                resizer.addEventListener('touchstart', initResize);
+            });
+        }
+
+        function initResize(e) {
+            e.preventDefault(); e.stopPropagation();
+            currentResizer = e.target;
+            currentColumn = currentResizer.parentElement;
+            startX = e.clientX || e.touches[0].clientX;
+            startWidth = currentColumn.offsetWidth;
+            isResizing = true;
+            document.body.classList.add('dragging');
+            currentResizer.classList.add('resizing');
+            document.addEventListener('mousemove', resizeColumn);
+            document.addEventListener('touchmove', resizeColumn);
+            document.addEventListener('mouseup', stopResize);
+            document.addEventListener('touchend', stopResize);
+        }
+
+        function resizeColumn(e) {
+            if (!isResizing || !currentColumn) return;
+            e.preventDefault();
+            const currentX = e.clientX || e.touches[0].clientX;
+            const diffX = currentX - startX;
+            const newWidth = Math.max(50, startWidth + diffX);
+            currentColumn.style.width = `${newWidth}px`;
+            const columnIndex = Array.from(currentColumn.parentElement.children).indexOf(currentColumn);
+            const rows = invoiceTable.querySelectorAll('tr');
+            rows.forEach(row => {
+                const cells = row.children;
+                if (cells.length > columnIndex) cells[columnIndex].style.width = `${newWidth}px`;
+            });
+        }
+
+        function stopResize() {
+            if (!isResizing) return;
+            isResizing = false;
+            document.body.classList.remove('dragging');
+            if (currentResizer) currentResizer.classList.remove('resizing');
+            document.removeEventListener('mousemove', resizeColumn);
+            document.removeEventListener('touchmove', resizeColumn);
+            document.removeEventListener('mouseup', stopResize);
+            document.removeEventListener('touchend', stopResize);
+            currentResizer = null; currentColumn = null;
+        }
+
+        function resetForm() {
+            if (confirm('确定要重置所有表单数据吗？')) {
+                salesmanInput.value = ''; invoiceNumberInput.value = ''; invoiceDateInput.value = '';
+                customerNameInput.value = ''; customerAddressInput.value = '';
+                if (document.getElementById('customerContact')) document.getElementById('customerContact').value = '';
+                if (document.getElementById('customerCountry')) document.getElementById('customerCountry').value = '';
+                resetImageUpload(paymentImageInput, paymentPreview, 'payment');
+                uploadedImages.design = {};
+                productsContainer.innerHTML = ''; productCount = 0;
+                addNewProduct();
+                shippingFeeInput.value = ''; shippingFeeDiv6Input.value = '';
+                customsClearanceInput.value = ''; shippingCostInput.value = ''; totalPriceInput.value = '';
+                allProductsProfitElement.textContent = '0.00'; shippingProfitElement.textContent = '0.00';
+                totalProfitElement.textContent = '0.00'; profitMarginElement.textContent = '0.00%';
+                updateQuotationPreview(); updateInvoicePreview();
+            }
+        }
+
+        // ================= 导出功能 =================
+        function exportData() {
+            const today = new Date();
+            const dateStr = today.toISOString().split('T')[0];
+
+            let customerName = customerNameInput.value.trim();
+            if (!customerName) {
+                customerName = "未命名客户";
+            }
+
+            const safeCustomerName = customerName.replace(/[\\/:*?"<>|]/g, "_");
+            const fileName = `${dateStr}_${safeCustomerName}.json`;
+
+            const data = {
+                version: "1.0",
+                exportDate: new Date().toISOString(),
+                customerInfo: {
+                    salesman: salesmanInput.value,
+                    invoiceNumber: invoiceNumberInput.value,
+                    invoiceDate: invoiceDateInput.value,
+                    customerName: customerNameInput.value,
+                    customerContact: document.getElementById('customerContact')?.value || '',
+                    customerCountry: document.getElementById('customerCountry')?.value || '',
+                    customerAddress: customerAddressInput.value,
+                    customsClearance: customsClearanceInput.value,
+                    shippingFee: shippingFeeInput.value,
+                    shippingCost: shippingCostInput.value
+                },
+                products: [],
+                customModels: {}
+            };
+
+            for (let i = 1; i <= productCount; i++) {
+                data.products.push({
+                    model: document.getElementById(`model-${i}`).value,
+                    printing: document.getElementById(`printing-${i}`).value,
+                    quantity: document.getElementById(`quantity-${i}`).value,
+                    clothesCost: document.getElementById(`clothesCost-${i}`).value,
+                    laborCostPerUnit: document.getElementById(`laborCostPerUnit-${i}`).value,
+                    sampleFee: document.getElementById(`sampleFee-${i}`).value,
+                    unitPrice: document.getElementById(`unitPrice-${i}`).value
+                });
+            }
+
+            for (const [key, value] of Object.entries(modelData)) {
+                if (!value.isDefault) {
+                    data.customModels[key] = value;
+                }
+            }
+
+            calculateTotalPrice();
+            calculateAllProductsProfit();
+            calculateShippingProfit();
+            calculateTotalProfit();
+            calculateProfitMargin();
+            
+            data.customerInfo.totalPrice = totalPriceInput.value;
+            data.calculations = {
+                allProductsProfit: allProductsProfitElement.textContent,
+                shippingProfit: shippingProfitElement.textContent,
+                totalProfit: totalProfitElement.textContent,
+                profitMargin: profitMarginElement.textContent
+            };
+
+            const jsonString = JSON.stringify(data, null, 2);
+            const blob = new Blob([jsonString], { type: "application/json" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            
+            a.href = url;
+            a.download = fileName;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        // ================= 导入功能 =================
+        function importData(file) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const data = JSON.parse(e.target.result);
+                    
+                    if (!data.customerInfo || !data.products) {
+                        alert("文件格式错误：不是有效的报价单文件");
+                        return;
+                    }
+
+                    if (!confirm("导入将覆盖当前所有数据且无法撤销（图片将被清空），确定继续吗？")) {
+                        return;
+                    }
+
+                    productsContainer.innerHTML = '';
+                    productCount = 0;
+                    uploadedImages = { design: {}, payment: null };
+                    resetImageUpload(paymentImageInput, paymentPreview, 'payment');
+
+                    const info = data.customerInfo;
+                    salesmanInput.value = info.salesman || '';
+                    invoiceNumberInput.value = info.invoiceNumber || '';
+                    invoiceDateInput.value = info.invoiceDate || '';
+                    customerNameInput.value = info.customerName || '';
+                    if (document.getElementById('customerContact')) {
+                        document.getElementById('customerContact').value = info.customerContact || '';
+                    }
+                    if (document.getElementById('customerCountry')) {
+                        document.getElementById('customerCountry').value = info.customerCountry || '';
+                    }
+                    customerAddressInput.value = info.customerAddress || '';
+                    customsClearanceInput.value = info.customsClearance || '';
+                    shippingFeeInput.value = info.shippingFee || '';
+                    shippingCostInput.value = info.shippingCost || '';
+
+                    if (data.customModels) {
+                        for (const [key, value] of Object.entries(data.customModels)) {
+                            if (!modelData[key]) {
+                                modelData[key] = value;
+                            }
+                        }
+                        localStorage.setItem('customModelData', JSON.stringify(modelData));
+                        renderModelCostTable();
+                    }
+
+                    if (data.products && data.products.length > 0) {
+                        data.products.forEach((prod, index) => {
+                            const newIndex = index + 1;
+                            const newProductForm = createProductForm(newIndex);
+                            productsContainer.appendChild(newProductForm);
+                            
+                            const modelSelect = document.getElementById(`model-${newIndex}`);
+                            modelSelect.value = prod.model || '';
+                            modelSelect.dispatchEvent(new Event('change'));
+                            
+                            document.getElementById(`printing-${newIndex}`).value = prod.printing || '';
+                            document.getElementById(`quantity-${newIndex}`).value = prod.quantity || '';
+                            document.getElementById(`clothesCost-${newIndex}`).value = prod.clothesCost || '';
+                            document.getElementById(`laborCostPerUnit-${newIndex}`).value = prod.laborCostPerUnit || '';
+                            document.getElementById(`sampleFee-${newIndex}`).value = prod.sampleFee || '';
+                            document.getElementById(`unitPrice-${newIndex}`).value = prod.unitPrice || '';
+                            
+                            const inputs = newProductForm.querySelectorAll('.product-input:not([readonly])');
+                            inputs.forEach(input => input.dispatchEvent(new Event('input')));
+                        });
+                    } else {
+                        addNewProduct();
+                    }
+
+                    calculateTotalPrice();
+                    calculateAllProductsProfit();
+                    calculateShippingProfit();
+                    calculateTotalProfit();
+                    calculateProfitMargin();
+                    updateQuotationPreview();
+                    updateInvoicePreview();
+
+                    alert("导入成功！\n注意：图片数据未包含在文件中，已重置为空白，请重新上传。");
+
+                } catch (error) {
+                    console.error(error);
+                    alert("文件解析失败，请确保上传的是有效的 .json 报价单文件。");
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        // ========== Airtable自动保存功能 ==========
+        // 收集当前报价单数据
+        function collectQuotationData() {
+            const products = [];
+            for (let i = 1; i <= productCount; i++) {
+                products.push({
+                    model: document.getElementById(`model-${i}`).value,
+                    printing: document.getElementById(`printing-${i}`).value,
+                    quantity: document.getElementById(`quantity-${i}`).value,
+                    clothesCost: document.getElementById(`clothesCost-${i}`).value,
+                    laborCostPerUnit: document.getElementById(`laborCostPerUnit-${i}`).value,
+                    sampleFee: document.getElementById(`sampleFee-${i}`).value,
+                    unitPrice: document.getElementById(`unitPrice-${i}`).value,
+                    unitCost: document.getElementById(`unitCost-${i}`).value,
+                    clothesTotal: document.getElementById(`clothesTotal-${i}`).value,
+                    productProfit: document.getElementById(`productProfit-${i}`).value
+                });
+            }
+
+            return {
+                id: Date.now().toString(),
+                saveDate: new Date().toISOString().split('T')[0],
+                salesman: salesmanInput.value,
+                invoiceNumber: invoiceNumberInput.value,
+                invoiceDate: invoiceDateInput.value,
+                customerName: customerNameInput.value,
+                customerContact: document.getElementById('customerContact')?.value || '',
+                customerCountry: document.getElementById('customerCountry')?.value || '',
+                customerAddress: customerAddressInput.value,
+                customsClearance: customsClearanceInput.value,
+                shippingFee: shippingFeeInput.value,
+                shippingCost: shippingCostInput.value,
+                totalPrice: totalPriceInput.value,
+                allProductsProfit: allProductsProfitElement.textContent,
+                shippingProfit: shippingProfitElement.textContent,
+                totalProfit: totalProfitElement.textContent,
+                profitMargin: profitMarginElement.textContent,
+                products: products
+            };
+        }
+
+        // 保存报价单到Airtable
+        async function saveQuotation() {
+            const quotationData = collectQuotationData();
+            
+            if (!quotationData.customerName) {
+                alert('请填写客户名称');
+                return;
+            }
+
+            try {
+                const saveBtn = document.getElementById('saveQuotationBtn');
+                const originalText = saveBtn.innerHTML;
+                saveBtn.innerHTML = '<i class="fa fa-spinner fa-spin mr-1"></i>保存中...';
+                saveBtn.disabled = true;
+
+                // 准备要发送到Airtable的数据
+                const fields = {
+                    "记录ID": quotationData.id,
+                    "保存时间": quotationData.saveDate,
+                    "业务员": quotationData.salesman || '',
+                    "客户名称": quotationData.customerName || '',
+                    "联系方式": quotationData.customerContact || '',
+                    "国家": quotationData.customerCountry || '',
+                    "客户地址": quotationData.customerAddress || '',
+                    "总价": parseFloat(quotationData.totalPrice) || 0,
+                    "总利润": parseFloat(quotationData.totalProfit) || 0,
+                    "利润率": parseFloat(quotationData.profitMargin) / 100 || 0,
+                    "产品数据": JSON.stringify(quotationData.products || [])
+                };
+
+                // 调用Airtable API（使用个人访问令牌）
+                const response = await fetch(`https://api.airtable.com/v0/${AIRTABLE_CONFIG.baseId}/${encodeURIComponent(AIRTABLE_CONFIG.tableName)}`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${AIRTABLE_CONFIG.token}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ fields: fields })
+                });
+
+                const data = await response.json();
+                
+                if (data.error) {
+                    throw new Error(data.error.message || '保存失败');
+                }
+
+                saveBtn.innerHTML = originalText;
+                saveBtn.disabled = false;
+                
+                alert('✅ 报价单自动保存成功！可在Airtable中查看');
+                
+            } catch (error) {
+                console.error('保存失败:', error);
+                alert('保存失败：' + error.message);
+                saveBtn.innerHTML = originalText;
+                saveBtn.disabled = false;
+            }
+        }
+
+        // 从Airtable搜索报价记录
+        async function searchQuotations() {
+            const keyword = document.getElementById('searchQuotationInput').value;
+            
+            if (!keyword.trim()) {
+                alert('请输入客户名称');
+                return;
+            }
+
+            try {
+                // 调用Airtable搜索API
+                const response = await fetch(`https://api.airtable.com/v0/${AIRTABLE_CONFIG.baseId}/${encodeURIComponent(AIRTABLE_CONFIG.tableName)}?filterByFormula={客户名称}="${keyword}"`, {
+                    headers: {
+                        'Authorization': `Bearer ${AIRTABLE_CONFIG.token}`
+                    }
+                });
+
+                const data = await response.json();
+                
+                if (data.error) {
+                    throw new Error(data.error.message);
+                }
+
+                // 显示搜索结果
+                const resultsDiv = document.getElementById('searchResults');
+                let resultHtml = '';
+                
+                if (data.records && data.records.length > 0) {
+                    data.records.forEach(record => {
+                        resultHtml += `
+                            <div class="p-2 border-b hover:bg-gray-100 cursor-pointer" onclick="alert('点击加载功能待实现：' + '${record.id}')">
+                                ${record.fields['客户名称'] || '未知'} - $${record.fields['总价'] || 0} (${record.fields['保存时间'] || ''})
+                            </div>
+                        `;
+                    });
+                } else {
+                    resultHtml = '<div class="p-2">未找到记录</div>';
+                }
+
+                resultsDiv.innerHTML = resultHtml;
+                resultsDiv.style.display = 'block';
+                
+            } catch (error) {
+                console.error('搜索失败:', error);
+                alert('搜索失败：' + error.message);
+            }
+        }
+
+        function downloadQuotation() {
+            downloadQuotationBtn.innerHTML = '<i class="fa fa-spinner fa-spin mr-2"></i>生成中...';
+            downloadQuotationBtn.disabled = true;
+            html2canvas(document.getElementById('quotationPreview'), { scale: 2, useCORS: true, logging: false }).then(canvas => {
+                downloadQuotationBtn.innerHTML = '<i class="fa fa-download mr-2"></i>Download Image';
+                downloadQuotationBtn.disabled = false;
+                const imgData = canvas.toDataURL('image/png');
+                generatedImage.src = imgData;
+                imageModal.classList.remove('hidden');
+                const link = document.createElement('a');
+                link.download = `报价单_${new Date().getTime()}.png`;
+                link.href = imgData;
+                link.click();
+            }).catch(err => {
+                downloadQuotationBtn.innerHTML = '<i class="fa fa-download mr-2"></i>Download Image';
+                downloadQuotationBtn.disabled = false;
+                alert('生成图片失败');
+            });
+        }
+
+        function downloadQuotationPDF() {
+            downloadQuotationPdfBtn.innerHTML = '<i class="fa fa-spinner fa-spin mr-2"></i>生成中...';
+            downloadQuotationPdfBtn.disabled = true;
+            const { jsPDF } = window.jspdf;
+            const pdf = new jsPDF('p', 'mm', 'a4');
+            html2canvas(document.getElementById('quotationPreview'), { scale: 2, useCORS: true, logging: false }).then(canvas => {
+                downloadQuotationPdfBtn.innerHTML = '<i class="fa fa-file-pdf-o mr-2"></i>Download PDF';
+                downloadQuotationPdfBtn.disabled = false;
+                const imgWidth = 200;
+                const imgHeight = canvas.height * imgWidth / canvas.width;
+                pdf.addImage(canvas.toDataURL('image/jpeg', 1.0), 'JPEG', 5, 5, imgWidth, imgHeight);
+                pdf.save(`报价单_${new Date().getTime()}.pdf`);
+            }).catch(err => {
+                downloadQuotationPdfBtn.innerHTML = '<i class="fa fa-file-pdf-o mr-2"></i>Download PDF';
+                downloadQuotationPdfBtn.disabled = false;
+                alert('生成PDF失败');
+            });
+        }
+
+        function downloadInvoice() {
+            downloadInvoiceBtn.innerHTML = '<i class="fa fa-spinner fa-spin mr-2"></i>生成中...';
+            downloadInvoiceBtn.disabled = true;
+            html2canvas(document.getElementById('invoicePreview'), { scale: 2, useCORS: true, logging: false }).then(canvas => {
+                downloadInvoiceBtn.innerHTML = '<i class="fa fa-download mr-2"></i>Download Image';
+                downloadInvoiceBtn.disabled = false;
+                const imgData = canvas.toDataURL('image/png');
+                generatedInvoiceImage.src = imgData;
+                invoiceImageModal.classList.remove('hidden');
+                const link = document.createElement('a');
+                link.download = `形式发票_${new Date().getTime()}.png`;
+                link.href = imgData;
+                link.click();
+            }).catch(err => {
+                downloadInvoiceBtn.innerHTML = '<i class="fa fa-download mr-2"></i>Download Image';
+                downloadInvoiceBtn.disabled = false;
+                alert('生成发票图片失败');
+            });
+        }
+
+        function downloadInvoicePDF() {
+            downloadInvoicePdfBtn.innerHTML = '<i class="fa fa-spinner fa-spin mr-2"></i>生成中...';
+            downloadInvoicePdfBtn.disabled = true;
+            const { jsPDF } = window.jspdf;
+            const pdf = new jsPDF('p', 'mm', 'a4');
+            html2canvas(document.getElementById('invoicePreview'), { scale: 2, useCORS: true, logging: false }).then(canvas => {
+                downloadInvoicePdfBtn.innerHTML = '<i class="fa fa-file-pdf-o mr-2"></i>Download PDF';
+                downloadInvoicePdfBtn.disabled = false;
+                const imgWidth = 200;
+                const imgHeight = canvas.height * imgWidth / canvas.width;
+                pdf.addImage(canvas.toDataURL('image/jpeg', 1.0), 'JPEG', 5, 5, imgWidth, imgHeight);
+                pdf.save(`形式发票_${new Date().getTime()}.pdf`);
+            }).catch(err => {
+                downloadInvoicePdfBtn.innerHTML = '<i class="fa fa-file-pdf-o mr-2"></i>Download PDF';
+                downloadInvoicePdfBtn.disabled = false;
+                alert('生成发票PDF失败');
+            });
+        }
+
+        function renderModelCostTable() {
+            modelCostTable.innerHTML = '';
+            const sortedModels = Object.keys(modelData).sort();
+            if (sortedModels.length === 0) {
+                modelCostTable.innerHTML = `<tr><td colspan="4" class="py-4 text-center text-gray-500">暂无型号数据</td></tr>`;
+                return;
+            }
+            sortedModels.forEach(model => {
+                const data = modelData[model];
+                const isDefault = data.isDefault ? 'default-model' : '';
+                const row = document.createElement('tr');
+                row.className = `hover:bg-gray-50 transition-colors ${isDefault}`;
+                row.innerHTML = `
+                    <td class="py-2 px-3">${model}</td>
+                    <td class="py-2 px-3"><div class="text-sm">${data.fabric}</div><div class="text-xs text-gray-500">${data.fabricEn || ''}</div></td>
+                    <td class="py-2 px-3 text-right">$${data.cost.toFixed(2)}</td>
+                    <td class="py-2 px-3 text-center">
+                        ${!data.isDefault ? `<button type="button" class="delete-model-btn text-gray-400 hover:text-accent p-1" data-model="${model}"><i class="fa fa-trash-o"></i></button>` : '<span class="text-xs text-gray-400">默认</span>'}
+                    </td>`;
+                modelCostTable.appendChild(row);
+            });
+            document.querySelectorAll('.delete-model-btn').forEach(btn => {
+                btn.addEventListener('click', function() { openDeleteModelModal(this.getAttribute('data-model')); });
+            });
+        }
+
+        function openDeleteModelModal(model) {
+            currentDeleteModel = model;
+            deleteModelNameElement.textContent = model;
+            confirmDeleteModal.classList.remove('hidden');
+        }
+
+        function deleteModel() {
+            if (!currentDeleteModel || modelData[currentDeleteModel]?.isDefault) return;
+            let inUse = false;
+            for (let i = 1; i <= productCount; i++) {
+                const modelInput = document.getElementById(`model-${i}`);
+                if (modelInput && modelInput.value === currentDeleteModel) { inUse = true; break; }
+            }
+            if (inUse && !confirm(`型号 ${currentDeleteModel} 正在被产品使用，确定要删除吗？`)) return;
+            
+            delete modelData[currentDeleteModel];
+            localStorage.setItem('customModelData', JSON.stringify(modelData));
+            renderModelCostTable();
+            
+            for (let i = 1; i <= productCount; i++) {
+                const modelSelect = document.getElementById(`model-${i}`);
+                if (modelSelect) {
+                    const option = modelSelect.querySelector(`option[value="${currentDeleteModel}"]`);
+                    if (option) option.remove();
+                    if (modelSelect.value === currentDeleteModel) {
+                        modelSelect.value = '';
+                        document.getElementById(`clothesCost-${i}`).value = '';
+                        calculateProductUnitCost(i); calculateProductValues(i);
+                        calculateTotalPrice(); calculateAllProductsProfit();
+                        calculateShippingProfit(); calculateTotalProfit();
+                        calculateProfitMargin(); updateQuotationPreview(); updateInvoicePreview();
+                    }
+                }
+            }
+            confirmDeleteModal.classList.add('hidden');
+            currentDeleteModel = null;
+        }
+
+        function addNewModel() {
+            const modelName = newModelNameInput.value.trim();
+            const modelCost = parseFloat(newModelCostInput.value) || 0;
+            const modelFabric = newModelFabricInput.value.trim();
+            const modelFabricEn = newModelFabricEnInput.value.trim();
+            
+            if (!modelName) { alert('请输入型号名称'); newModelNameInput.focus(); return; }
+            if (modelCost <= 0) { alert('请输入有效的成本价格'); newModelCostInput.focus(); return; }
+            if (!modelFabric) { alert('请输入面料信息'); newModelFabricInput.focus(); return; }
+            
+            if (modelData[modelName]) {
+                if (!confirm(`型号 ${modelName} 已存在，是否覆盖？`)) return;
+            }
+            
+            modelData[modelName] = { fabric: modelFabric, cost: modelCost, fabricEn: modelFabricEn, isDefault: false };
+            localStorage.setItem('customModelData', JSON.stringify(modelData));
+            renderModelCostTable();
+            
+            for (let i = 1; i <= productCount; i++) {
+                const modelSelect = document.getElementById(`model-${i}`);
+                if (modelSelect) {
+                    let option = modelSelect.querySelector(`option[value="${modelName}"]`);
+                    if (!option) {
+                        option = document.createElement('option');
+                        option.value = modelName;
+                        option.textContent = modelName;
+                        modelSelect.appendChild(option);
+                    }
+                }
+            }
+            
+            resetAddModelForm();
+            addModelForm.classList.add('hidden');
+        }
+
+        function resetAddModelForm() {
+            newModelNameInput.value = ''; newModelCostInput.value = '';
+            newModelFabricInput.value = ''; newModelFabricEnInput.value = '';
+        }
+
+        function init() {
+            addNewProduct();
+            renderModelCostTable();
+            const today = new Date().toISOString().split('T')[0];
+            invoiceDateInput.value = today;
+            previewDate.textContent = `Date: ${new Date().toLocaleDateString()}`;
+            invoiceInvoiceDate.textContent = new Date().toLocaleDateString();
+            
+            shippingFeeInput.addEventListener('input', function() {
+                const shippingFee = parseFloat(this.value) || 0;
+                shippingFeeDiv6Input.value = (shippingFee * 6).toFixed(2);
+                calculateTotalPrice(); calculateShippingProfit(); calculateTotalProfit(); calculateProfitMargin();
+                updateQuotationPreview(); updateInvoicePreview();
+            });
+            shippingCostInput.addEventListener('input', function() {
+                calculateShippingProfit(); calculateTotalProfit(); calculateProfitMargin();
+            });
+            customsClearanceInput.addEventListener('input', function() {
+                updateQuotationPreview(); updateInvoicePreview();
+            });
+            salesmanInput.addEventListener('change', updateInvoicePreview);
+            invoiceNumberInput.addEventListener('input', updateInvoicePreview);
+            invoiceDateInput.addEventListener('change', updateInvoicePreview);
+            customerNameInput.addEventListener('input', updateInvoicePreview);
+            customerAddressInput.addEventListener('input', updateInvoicePreview);
+            paymentImageInput.addEventListener('change', function() { handleImageUpload(this, paymentPreview, 'payment'); });
+            deliveryDays.addEventListener('input', function() { if (this.textContent && isNaN(parseInt(this.textContent))) this.textContent = '20'; });
+            
+            addProductBtn.addEventListener('click', addNewProduct);
+            resetBtn.addEventListener('click', resetForm);
+            
+            exportBtn.addEventListener('click', exportData);
+            importBtn.addEventListener('click', () => importFileInput.click());
+            importFileInput.addEventListener('change', function(e) {
+                if (e.target.files.length > 0) importData(e.target.files[0]);
+                e.target.value = '';
+            });
+
+            previewBtn.addEventListener('click', function() {
+                updateQuotationPreview();
+                quotationPreview.classList.remove('hidden');
+                invoicePreview.classList.add('hidden');
+                quotationPreview.scrollIntoView({ behavior: 'smooth' });
+            });
+            previewInvoiceBtn.addEventListener('click', function() {
+                updateInvoicePreview();
+                invoicePreview.classList.remove('hidden');
+                quotationPreview.classList.add('hidden');
+                invoicePreview.scrollIntoView({ behavior: 'smooth' });
+            });
+            
+            downloadQuotationBtn.addEventListener('click', downloadQuotation);
+            downloadQuotationPdfBtn.addEventListener('click', downloadQuotationPDF);
+            downloadInvoiceBtn.addEventListener('click', downloadInvoice);
+            downloadInvoicePdfBtn.addEventListener('click', downloadInvoicePDF);
+            
+            closeModal.addEventListener('click', () => imageModal.classList.add('hidden'));
+            closeInvoiceModal.addEventListener('click', () => invoiceImageModal.classList.add('hidden'));
+            closeImageViewer.addEventListener('click', () => imageViewerModal.classList.add('hidden'));
+            
+            addModelBtn.addEventListener('click', function() {
+                addModelForm.classList.toggle('hidden');
+                if (!addModelForm.classList.contains('hidden')) newModelNameInput.focus();
+            });
+            cancelAddModelBtn.addEventListener('click', function() { resetAddModelForm(); addModelForm.classList.add('hidden'); });
+            confirmAddModelBtn.addEventListener('click', addNewModel);
+            
+            closeDeleteModal.addEventListener('click', function() { confirmDeleteModal.classList.add('hidden'); currentDeleteModel = null; });
+            cancelDeleteBtn.addEventListener('click', function() { confirmDeleteModal.classList.add('hidden'); currentDeleteModel = null; });
+            confirmDeleteBtn.addEventListener('click', deleteModel);
+            
+            imageModal.addEventListener('click', function(e) { if (e.target === this) imageModal.classList.add('hidden'); });
+            invoiceImageModal.addEventListener('click', function(e) { if (e.target === this) invoiceImageModal.classList.add('hidden'); });
+            confirmDeleteModal.addEventListener('click', function(e) { if (e.target === this) { confirmDeleteModal.classList.add('hidden'); currentDeleteModel = null; } });
+            imageViewerModal.addEventListener('click', function(e) { if (e.target === this) imageViewerModal.classList.add('hidden'); });
+
+            // 绑定Airtable保存和搜索事件
+            const saveQuotationBtn = document.getElementById('saveQuotationBtn');
+            const searchQuotationBtn = document.getElementById('searchQuotationBtn');
+
+            if (saveQuotationBtn) {
+                saveQuotationBtn.addEventListener('click', saveQuotation);
+            }
+
+            if (searchQuotationBtn) {
+                searchQuotationBtn.addEventListener('click', searchQuotations);
+            }
+
+            // 点击其他地方隐藏搜索结果
+            document.addEventListener('click', function(e) {
+                const resultsDiv = document.getElementById('searchResults');
+                const searchInput = document.getElementById('searchQuotationInput');
+                const searchBtn = document.getElementById('searchQuotationBtn');
+                
+                if (!resultsDiv.contains(e.target) && e.target !== searchInput && e.target !== searchBtn) {
+                    resultsDiv.style.display = 'none';
+                }
+            });
+        }
+
+        document.addEventListener('DOMContentLoaded', init);
+    </script>
+</body>
+</html>
